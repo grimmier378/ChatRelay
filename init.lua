@@ -13,7 +13,7 @@ local Actor -- preloaded variable outside of the function
 local showMain, showConfig = false, false
 local winFlags = bit32.bor(ImGuiWindowFlags.None)
 local RUNNING, aSize  = false, false
-local currZone, lastZone, guildName, ME, configFile
+local currZone, lastZone, guildName, ME, configFile, mode
 local guildChat = {}
 local tellChat = {}
 local lastMessages = {}
@@ -27,6 +27,7 @@ defaults = {
     RelayGuild = true,
     MaxRow = 1,
     AlphaSort = false,
+    ShowOnNewMessage = true,
 }
 
 ---comment Check to see if the file we want to work on exists.
@@ -112,8 +113,13 @@ function RegisterActor()
                 tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
             end
             appendColoredTimestamp(tellChat[MemberEntry.Name], MemberEntry.Message)
-        elseif MemberEntry.Subject == 'Reply' and MemberEntry.Name == ME then
+        elseif MemberEntry.Subject == 'Reply' and MemberEntry.Name == ME and settings[script].RelayTells then
             mq.cmdf("/tell %s %s", MemberEntry.Tell, MemberEntry.Message)
+        else
+            return
+        end
+        if settings[script].ShowOnNewMessage and mode == 'driver' then
+            showMain = true
         end
     end)
 end
@@ -246,6 +252,8 @@ local function RenderGUI()
             RelayTells = ImGui.Checkbox("Relay Tells", RelayTells)
             RelayGuild = ImGui.Checkbox("Relay Guild", RelayGuild)
             ImGui.Separator()
+            settings[script].ShowOnNewMessage = ImGui.Checkbox("Show on New Message", settings[script].ShowOnNewMessage)
+            ImGui.Separator()
             if ImGui.Button("Save") then
                 settings[script].RelayTells = RelayTells
                 settings[script].RelayGuild = RelayGuild
@@ -262,15 +270,18 @@ local function checkArgs(args)
     if #args > 0 then
         if args[1] == 'driver' then
             showMain = true
+            mode = 'driver'
             print('\ayChat Relay:\ao Setting \atDriver\ax Mode. UI will be displayed.')
             print('\ayChat Relay:\ao Type \at/chatrelay show\ax. to Toggle the UI')
         elseif args[1] == 'client' then
             showMain = false
+            mode = 'client'
             print('\ayChat Relay:\ao Setting \atClient\ax Mode. UI will not be displayed.')
             print('\ayChat Relay:\ao Type \at/chatrelay show\ax. to Toggle the UI')
         end
     else
         showMain = true
+        mode = 'driver'
         print('\ayChat Relay: \aoNo arguments passed, defaulting to \atDriver\ax Mode. UI will be displayed.')
         print('\ayChat Relay: \aoUse \at/lua run chatrelay client\ax To start with the UI Off.')
         print('\ayChat Relay:\ao Type \at/chatrelay show\ax. to Toggle the UI')
@@ -298,6 +309,9 @@ local function processCommand(...)
             settings[script].RelayGuild = not settings[script].RelayGuild
             RelayGuild = settings[script].RelayGuild
             mq.pickle(configFile, settings)
+        elseif args[1] == 'autoshow' then
+            settings[script].ShowOnNewMessage = not settings[script].ShowOnNewMessage
+            mq.pickle(configFile, settings)
         else
             print('\ayChat Relay:\ao Invalid command given.')
         end
@@ -306,6 +320,7 @@ local function processCommand(...)
         print('\ayChat Relay:\ag /chatrelay gui \ao- Toggles the GUI on and off.')
         print('\ayChat Relay:\ag /chatrelay tells \ao- Toggles the Relay of Tells.')
         print('\ayChat Relay:\ag /chatrelay guild \ao- Toggles the Relay of Guild Chat.')
+        print('\ayChat Relay:\ag /chatrelay autoshow \ao- Toggles the Show on New Message.')
         print('\ayChat Relay:\ag /chatrelay exit \ao- Exits the plugin.')
     end
 end
