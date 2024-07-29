@@ -115,6 +115,15 @@ local function RegisterActor()
             appendColoredTimestamp(tellChat[MemberEntry.Name], MemberEntry.Message)
         elseif MemberEntry.Subject == 'Reply' and MemberEntry.Name == ME and settings[script].RelayTells then
             mq.cmdf("/tell %s %s", MemberEntry.Tell, MemberEntry.Message)
+        elseif MemberEntry.Subject == 'Hello' then
+            if MemberEntry.Name ~= ME then
+                if tellChat[MemberEntry.Name] == nil then
+                    tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
+                end
+                if guildChat[MemberEntry.Guild] == nil then
+                    guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Guild.."##chat_relayConsole")
+                end
+            end
         else
             return
         end
@@ -326,6 +335,10 @@ local function processCommand(...)
     end
 end
 
+local function firstRun()
+    Actor:send({mailbox = 'chat_relay'}, GenerateContent('Hello','Hello'))
+end
+
 local function init()
     ME = mq.TLO.Me.DisplayName()
     guildName = mq.TLO.Me.Guild()
@@ -344,6 +357,7 @@ local function init()
     guildChat[guildName] = ImGui.ConsoleWidget.new("chat_relay_Console"..guildName.."##chat_relayConsole")
     guildChat[guildName]:AppendText("Welcome to Chat Relay")
     tellChat[ME] = ImGui.ConsoleWidget.new("chat_relay_Console"..ME.."##chat_relayConsole")
+    firstRun()
     mq.imgui.init('Chat_Relay', RenderGUI)
 end
 
