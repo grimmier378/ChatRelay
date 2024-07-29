@@ -18,12 +18,12 @@ You can relay Guild Chat and / or Tells settings in the Config Window.
 
 ## Run
 
-```/lua run chatrelay driver``` will run in driver mode with the GUI displayed
-```/lua run chatrelay client``` will run in client mode without a GUI
+* ```/lua run chatrelay driver``` will run in driver mode with the GUI displayed
+* ```/lua run chatrelay client``` will run in client mode without a GUI
 
 ## Commands
 
-```/chatrelay tells``` 	Toggles tell monitoring on|off
-```/chatrelay guild``` 	Toggles guild monitoring on|off
-```/chatrelay gui``` 	Toggles the GUI
-```/chatrelay exit```	Closes the script
+* ```/chatrelay tells``` 	Toggles tell monitoring on|off
+* ```/chatrelay guild``` 	Toggles guild monitoring on|off
+* ```/chatrelay gui``` 		Toggles the GUI
+* ```/chatrelay exit```		Closes the script
