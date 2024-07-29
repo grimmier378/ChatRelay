@@ -93,7 +93,7 @@ local function appendColoredTimestamp(con, text)
 end
 
 --create mailbox for actors to send messages to
-function RegisterActor()
+local function RegisterActor()
     Actor = actors.register('chat_relay', function(message)
         local MemberEntry = message()
         if MemberEntry.Subject == 'Guild' and settings[script].RelayGuild then
@@ -124,13 +124,13 @@ function RegisterActor()
     end)
 end
 
-function StringTrim(s)
+local function StringTrim(s)
     return s:gsub("^%s*(.-)%s*$", "%1")
 end
 
 ---comments
 ---@param text string -- the incomming line of text from the command prompt
-function ChannelExecCommand(text, channName, channelID)
+local function ChannelExecCommand(text, channName, channelID)
     local separator = "|"
     local args = {}
     for arg in string.gmatch(text, "([^"..separator.."]+)") do
@@ -157,8 +157,9 @@ end
 local function getTellChat(line, who)
     if not settings[script].RelayTells then return end
     local checkNPC = string.format("npc =%s",who)
-    local checkPet = string.format("pet =%s",who)
-    if (mq.TLO.SpawnCount(checkNPC)() ~= 0) or (mq.TLO.SpawnCount(checkPet)() ~= 0) then return end
+    local checkPet = string.format("pcpet =%s",who)
+    local pet = mq.TLO.Me.Pet.DisplayName() or 'noPet'
+    if (mq.TLO.SpawnCount(checkNPC)() ~= 0 or mq.TLO.SpawnCount(checkPet)() ~= 0 or string.find(who, pet)) then return end
     Actor:send({mailbox = 'chat_relay'}, GenerateContent('Tell', line))
 end
 
