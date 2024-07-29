@@ -137,6 +137,17 @@ local function StringTrim(s)
     return s:gsub("^%s*(.-)%s*$", "%1")
 end
 
+local function sortedBoxes(boxes)
+    local keys = {}
+    for k in pairs(boxes) do
+        table.insert(keys, k)
+    end
+    table.sort(keys, function(a, b)
+        return a < b
+    end)
+    return keys
+end
+
 ---comments
 ---@param text string -- the incomming line of text from the command prompt
 local function ChannelExecCommand(text, channName, channelID)
@@ -196,7 +207,11 @@ local function RenderGUI()
                 if RelayGuild then
                     if ImGui.BeginTabItem("Guild Chat") then
                         if ImGui.BeginTabBar("Guild Chat##GuildChat", ImGuiTabBarFlags.None) then
-                            for gName, gConsole in pairs(guildChat) do
+                            local sortedKeys = {}
+                            sortedKeys = sortedBoxes(guildChat)
+                            for key in pairs(sortedKeys) do
+                                local gName = sortedKeys[key]
+                                local gConsole = guildChat[gName]
                                 local contentSizeX, contentSizeY = ImGui.GetContentRegionAvail()
                                 contentSizeY = contentSizeY - 10
                                 if ImGui.BeginTabItem(gName) then
@@ -212,7 +227,11 @@ local function RenderGUI()
                 if RelayTells then
                     if ImGui.BeginTabItem("Tell Chat") then
                         if ImGui.BeginTabBar("Tell Chat##TellChat", ImGuiTabBarFlags.None) then
-                            for tName, tConsole in pairs(tellChat) do
+                            local sortedKeys = {}
+                            sortedKeys = sortedBoxes(tellChat)
+                            for key in pairs(sortedKeys) do
+                                local tName = sortedKeys[key]
+                                local tConsole = tellChat[tName]
                                 local contentSizeX, contentSizeY = ImGui.GetContentRegionAvail()
                                 contentSizeY = contentSizeY - 30
                                 if ImGui.BeginTabItem(tName) then
