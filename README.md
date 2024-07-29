@@ -12,10 +12,13 @@ You can relay Guild Chat and / or Tells settings in the Config Window.
 ## Features
 
 * Tabs for Guild Chat and Tells will show if enabled.
-* Tabs for GuildNames will show for each unique guild name as they receive nessages, to relay that guilds chat into.
+* Tabs for GuildNames will show for each unique guild name as they receive messages, to relay that guilds chat into.
 * Tabs for each Character will show for each Character as they receive tells, otherwise you will always see yourself (driver)
 * /chatrelay commands bindings
-
+* Send and Replay to tells from GUI.
+  * Message format( who|message ) will have the character whose tab you are on send a message who = who to send it to message = your message.
+  * example tab(Char1) soandso|testing 123 will have character1 issue /tell soandso testing 123
+  
 ## Run
 
 * ```/lua run chatrelay driver``` will run in driver mode with the GUI displayed
