@@ -113,8 +113,10 @@ local function RegisterActor()
                 tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
             end
             appendColoredTimestamp(tellChat[MemberEntry.Name], MemberEntry.Message)
-        elseif MemberEntry.Subject == 'Reply' and MemberEntry.Name == ME and settings[script].RelayTells then
+        elseif MemberEntry.Subject == 'Reply' and string.lower(MemberEntry.Name) == string.lower(ME) and settings[script].RelayTells then
             mq.cmdf("/tell %s %s", MemberEntry.Tell, MemberEntry.Message)
+        elseif MemberEntry.Subject == 'GuildReply' and string.lower(MemberEntry.Name) == string.lower(ME) and MemberEntry.Guild == guildName then
+            mq.cmdf("/gu %s", MemberEntry.Message)
         elseif MemberEntry.Subject == 'Hello' then
             if MemberEntry.Name ~= ME then
                 if tellChat[MemberEntry.Name] == nil then
@@ -169,9 +171,35 @@ local function ChannelExecCommand(text, channName, channelID)
     end
 end
 
+---comments
+---@param text string -- the incomming line of text from the command prompt
+local function ChannelExecGuildCommand(text, channName, channelID)
+    local separator = "|"
+    local args = {}
+    for arg in string.gmatch(text, "([^"..separator.."]+)") do
+        table.insert(args, arg)
+    end
+    local who = args[1]
+    local message = args[2]
+    -- todo: implement history
+    if string.len(text) > 0 then
+        text = StringTrim(text)
+        if text == 'clear' then
+            channelID:Clear()
+        elseif who ~= nil and message ~= nil then
+            Actor:send({mailbox = 'chat_relay'}, { Name = who, Subject = 'GuildReply', Guild = channName, Message = message })
+        end
+    end
+end
+
 local function getGuildChat(line)
     if not settings[script].RelayGuild then return end
     Actor:send({mailbox = 'chat_relay'}, GenerateContent('Guild', line))
+end
+
+local function sendGuildChat(line)
+    if not settings[script].RelayGuild then return end
+    guildChat[guildName]:AppendText(line)
 end
 
 local function getTellChat(line, who)
@@ -213,9 +241,27 @@ local function RenderGUI()
                                 local gName = sortedKeys[key]
                                 local gConsole = guildChat[gName]
                                 local contentSizeX, contentSizeY = ImGui.GetContentRegionAvail()
-                                contentSizeY = contentSizeY - 10
+                                contentSizeY = contentSizeY - 30
                                 if ImGui.BeginTabItem(gName) then
                                     gConsole:Render(ImVec2(contentSizeX, contentSizeY))
+                                    ImGui.Separator()
+                                    local textFlags = bit32.bor(0,
+                                        ImGuiInputTextFlags.EnterReturnsTrue
+                                        -- not implemented yet
+                                        -- ImGuiInputTextFlags.CallbackCompletion,
+                                        -- ImGuiInputTextFlags.CallbackHistory
+                                    )
+                                    -- local contentSizeX, _ = ImGui.GetContentRegionAvail()
+                                    ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 2)
+                                    ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2)
+                                    local accept = false
+                                    local cmdBuffer = ''
+                                    ImGui.SetNextItemWidth(contentSizeX)
+                                    cmdBuffer, accept = ImGui.InputTextWithHint('##Input##'..gName, "who|message",cmdBuffer, textFlags)
+                                    if accept then
+                                        ChannelExecGuildCommand(cmdBuffer,gName, gConsole)
+                                        cmdBuffer = ''
+                                    end
                                     ImGui.EndTabItem()
                                 end
                             end
@@ -249,6 +295,7 @@ local function RenderGUI()
                                     ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2)
                                     local accept = false
                                     local cmdBuffer = ''
+                                    ImGui.SetNextItemWidth(contentSizeX)
                                     cmdBuffer, accept = ImGui.InputTextWithHint('##Input##'..tName, "who|message",cmdBuffer, textFlags)
                                     if accept then
                                         ChannelExecCommand(cmdBuffer,tName, tConsole)
@@ -370,6 +417,7 @@ local function init()
     RegisterActor()
     mq.delay(250)
     mq.event('guild_chat_relay', '#*# tells the guild, #*#', getGuildChat)
+    mq.event('guild_out_chat_relay', 'You say to your guild, #*#', sendGuildChat)
     mq.event('tell_chat_relay', "#1# tells you, '#*#", getTellChat)
     mq.event('out_chat_relay', "You told #1#, '#*#", getTellChat)
     RUNNING = true
