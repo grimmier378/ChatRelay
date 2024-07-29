@@ -323,6 +323,7 @@ local function init()
     mq.delay(250)
     mq.event('guild_chat_relay', '#*# tells the guild, #*#', getGuildChat)
     mq.event('tell_chat_relay', "#1# tells you, '#*#", getTellChat)
+    mq.event('out_chat_relay', "You told #1#, '#*#", getTellChat)
     RUNNING = true
     guildChat[guildName] = ImGui.ConsoleWidget.new("chat_relay_Console"..guildName.."##chat_relayConsole")
     guildChat[guildName]:AppendText("Welcome to Chat Relay")
