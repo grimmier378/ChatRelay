@@ -72,6 +72,7 @@ local function GenerateContent(sub, message)
         Name = ME,
         Guild = guildName,
         Message = message,
+        Tell = '',
     }
 end
 
@@ -111,8 +112,35 @@ function RegisterActor()
                 tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
             end
             appendColoredTimestamp(tellChat[MemberEntry.Name], MemberEntry.Message)
+        elseif MemberEntry.Subject == 'Reply' and MemberEntry.Name == ME then
+            mq.cmdf("/tell %s %s", MemberEntry.Tell, MemberEntry.Message)
         end
     end)
+end
+
+function StringTrim(s)
+    return s:gsub("^%s*(.-)%s*$", "%1")
+end
+
+---comments
+---@param text string -- the incomming line of text from the command prompt
+function ChannelExecCommand(text, channName, channelID)
+    local separator = "|"
+    local args = {}
+    for arg in string.gmatch(text, "([^"..separator.."]+)") do
+        table.insert(args, arg)
+    end
+    local who = args[1]
+    local message = args[2]
+    -- todo: implement history
+    if string.len(text) > 0 then
+        text = StringTrim(text)
+        if text == 'clear' then
+            channelID:Clear()
+        elseif who ~= nil and message ~= nil then
+            Actor:send({mailbox = 'chat_relay'}, { Name = channName, Subject = 'Reply', Tell = who, Message = message })
+        end
+    end
 end
 
 local function getGuildChat(line)
@@ -124,7 +152,7 @@ local function getTellChat(line, who)
     if not settings[script].RelayTells then return end
     local checkNPC = string.format("npc =%s",who)
     local checkPet = string.format("pet =%s",who)
-    if (mq.TLO.SpawnCount(checkNPC) ~= 0) or (mq.TLO.SpawnCount(checkPet) ~= 0) then return end
+    if (mq.TLO.SpawnCount(checkNPC)() ~= 0) or (mq.TLO.SpawnCount(checkPet)() ~= 0) then return end
     Actor:send({mailbox = 'chat_relay'}, GenerateContent('Tell', line))
 end
 
@@ -170,9 +198,27 @@ local function RenderGUI()
                         if ImGui.BeginTabBar("Tell Chat##TellChat", ImGuiTabBarFlags.None) then
                             for tName, tConsole in pairs(tellChat) do
                                 local contentSizeX, contentSizeY = ImGui.GetContentRegionAvail()
-                                contentSizeY = contentSizeY - 10
+                                contentSizeY = contentSizeY - 30
                                 if ImGui.BeginTabItem(tName) then
                                     tConsole:Render(ImVec2(contentSizeX, contentSizeY))
+                                    --Command Line
+                                    ImGui.Separator()
+                                    local textFlags = bit32.bor(0,
+                                        ImGuiInputTextFlags.EnterReturnsTrue
+                                        -- not implemented yet
+                                        -- ImGuiInputTextFlags.CallbackCompletion,
+                                        -- ImGuiInputTextFlags.CallbackHistory
+                                    )
+                                    -- local contentSizeX, _ = ImGui.GetContentRegionAvail()
+                                    ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 2)
+                                    ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2)
+                                    local accept = false
+                                    local cmdBuffer = ''
+                                    cmdBuffer, accept = ImGui.InputTextWithHint('##Input##'..tName, "who|message",cmdBuffer, textFlags)
+                                    if accept then
+                                        ChannelExecCommand(cmdBuffer,tName, tConsole)
+                                        cmdBuffer = ''
+                                    end
                                     ImGui.EndTabItem()
                                 end
                             end
