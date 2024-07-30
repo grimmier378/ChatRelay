@@ -121,6 +121,7 @@ local function RegisterActor()
             if MemberEntry.Name ~= ME then
                 if tellChat[MemberEntry.Name] == nil then
                     tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
+                    Actor:send({mailbox = 'chat_relay'}, GenerateContent('Hello', 'Hello'))
                 end
                 if guildChat[MemberEntry.Guild] == nil then
                     guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Guild.."##chat_relayConsole")
@@ -199,6 +200,9 @@ end
 
 local function sendGuildChat(line)
     if not settings[script].RelayGuild then return end
+    local repaceString = string.format('%s tells the guild,',ME)
+    lastMessages[guildName] = string.gsub(line,'You say to your guild,', repaceString)
+    print(lastMessages[guildName])
     guildChat[guildName]:AppendText(line)
 end
 
