@@ -9,7 +9,7 @@ local ImGui = require 'ImGui'
 local actors = require('actors')
 local defaults, settings = {}, {}
 local script = 'Chat Relay'
-local Actor -- preloaded variable outside of the function
+local RelayActor -- preloaded variable outside of the function
 local showMain, showConfig = false, false
 local winFlags = bit32.bor(ImGuiWindowFlags.None)
 local RUNNING, aSize  = false, false
@@ -17,7 +17,9 @@ local currZone, lastZone, guildName, ME, configFile, mode
 local guildChat = {}
 local tellChat = {}
 local lastMessages = {}
+local charBufferCount, guildBufferCount = {}, {}
 local RelayGuild, RelayTells = false, false
+local lastAnnounce = 0
 
 defaults = {
     Scale = 1,
@@ -67,9 +69,8 @@ local function loadSettings()
 end
 
 local function GenerateContent(sub, message)
-    local Subject = sub
     return {
-        Subject = Subject,
+        Subject = sub,
         Name = ME,
         Guild = guildName,
         Message = message,
@@ -90,11 +91,12 @@ local function appendColoredTimestamp(con, text)
     con:AppendTextUnformatted(yellowColor, "] ")
     con:AppendTextUnformatted(greenColor, text)
     con:AppendText("")
+    
 end
 
 --create mailbox for actors to send messages to
-local function RegisterActor()
-    Actor = actors.register('chat_relay', function(message)
+function RegisterRelayActor()
+    RelayActor = actors.register('chat_relay', function(message)
         local MemberEntry = message()
         if MemberEntry.Subject == 'Guild' and settings[script].RelayGuild then
             if lastMessages[MemberEntry.Guild] == nil then
@@ -108,23 +110,39 @@ local function RegisterActor()
                 guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Guild.."##chat_relayConsole")
             end
             appendColoredTimestamp(guildChat[MemberEntry.Guild], MemberEntry.Message)
+            guildBufferCount[MemberEntry.Guild].Current = guildBufferCount[MemberEntry.Guild].Current + 1
         elseif MemberEntry.Subject == 'Tell' and settings[script].RelayTells then
             if tellChat[MemberEntry.Name] == nil then
                 tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
             end
             appendColoredTimestamp(tellChat[MemberEntry.Name], MemberEntry.Message)
+            charBufferCount[MemberEntry.Name].Current = charBufferCount[MemberEntry.Name].Current + 1
         elseif MemberEntry.Subject == 'Reply' and string.lower(MemberEntry.Name) == string.lower(ME) and settings[script].RelayTells then
-            mq.cmdf("/tell %s %s", MemberEntry.Tell, MemberEntry.Message)
+            if MemberEntry.Tell == 'r' then
+                mq.cmdf("/r %s", MemberEntry.Message)
+            else
+                mq.cmdf("/tell %s %s", MemberEntry.Tell, MemberEntry.Message)
+            end
         elseif MemberEntry.Subject == 'GuildReply' and string.lower(MemberEntry.Name) == string.lower(ME) and MemberEntry.Guild == guildName then
             mq.cmdf("/gu %s", MemberEntry.Message)
         elseif MemberEntry.Subject == 'Hello' then
             if MemberEntry.Name ~= ME then
+                local announce = os.time()
                 if tellChat[MemberEntry.Name] == nil then
                     tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
-                    Actor:send({mailbox = 'chat_relay'}, GenerateContent('Hello', 'Hello'))
+                    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Hello', 'Hello'))
+                    charBufferCount[MemberEntry.Name] = {Current = 1, Last = 1}
+                    appendColoredTimestamp(tellChat[MemberEntry.Name], "ChatRelay: User Added")
+                    lastAnnounce = announce
                 end
                 if guildChat[MemberEntry.Guild] == nil then
                     guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Guild.."##chat_relayConsole")
+                    guildBufferCount[MemberEntry.Guild] = {Current = 1, Last = 1}
+                    appendColoredTimestamp(guildChat[MemberEntry.Guild], "ChatRelay: Guild Added")
+                end
+                if announce - lastAnnounce > 5 then
+                    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Hello', 'Hello'))
+                    lastAnnounce = announce
                 end
             end
         else
@@ -167,7 +185,7 @@ local function ChannelExecCommand(text, channName, channelID)
         if text == 'clear' then
             channelID:Clear()
         elseif who ~= nil and message ~= nil then
-            Actor:send({mailbox = 'chat_relay'}, { Name = channName, Subject = 'Reply', Tell = who, Message = message })
+            RelayActor:send({mailbox = 'chat_relay'}, { Name = channName, Subject = 'Reply', Tell = who, Message = message })
         end
     end
 end
@@ -188,14 +206,14 @@ local function ChannelExecGuildCommand(text, channName, channelID)
         if text == 'clear' then
             channelID:Clear()
         elseif who ~= nil and message ~= nil then
-            Actor:send({mailbox = 'chat_relay'}, { Name = who, Subject = 'GuildReply', Guild = channName, Message = message })
+            RelayActor:send({mailbox = 'chat_relay'}, { Name = who, Subject = 'GuildReply', Guild = channName, Message = message })
         end
     end
 end
 
 local function getGuildChat(line)
     if not settings[script].RelayGuild then return end
-    Actor:send({mailbox = 'chat_relay'}, GenerateContent('Guild', line))
+    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Guild', line))
 end
 
 local function sendGuildChat(line)
@@ -208,16 +226,18 @@ end
 
 local function getTellChat(line, who)
     if not settings[script].RelayTells then return end
-    local checkNPC = string.format("npc =%s",who)
-    local checkPet = string.format("pcpet =%s",who)
+    local checkNPC = string.format("npc %s",who)
+    local master = mq.TLO.Spawn(who).Master.Type() or 'noMaster'
+    -- local checkPet = string.format("pcpet %s",who)
     local pet = mq.TLO.Me.Pet.DisplayName() or 'noPet'
-    if (mq.TLO.SpawnCount(checkNPC)() ~= 0 or mq.TLO.SpawnCount(checkPet)() ~= 0 or string.find(who, pet)) then return end
-    Actor:send({mailbox = 'chat_relay'}, GenerateContent('Tell', line))
+    if (mq.TLO.SpawnCount(checkNPC)() ~= 0 or master == 'PC' or pet == who) then return end
+    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Tell', line))
 end
 
 local function RenderGUI()
 
     if showMain then
+        --ImGui.PushStyleColor(ImGuiCol.Tab, ImVec4(0.000, 0.000, 0.000, 0.000))
         ImGui.PushStyleColor(ImGuiCol.TabActive, ImVec4(0.848, 0.449, 0.115, 1.000))
         ImGui.SetNextWindowSize(185, 480, ImGuiCond.FirstUseEver)
         if aSize then
@@ -283,8 +303,17 @@ local function RenderGUI()
                                 local tName = sortedKeys[key]
                                 local tConsole = tellChat[tName]
                                 local contentSizeX, contentSizeY = ImGui.GetContentRegionAvail()
+                                local colFlag = false
                                 contentSizeY = contentSizeY - 30
+                                if charBufferCount[tName].Current > charBufferCount[tName].Last then
+                                    ImGui.PushStyleColor(ImGuiCol.Text, ImVec4(1, 0, 0, 1))
+                                    colFlag = true
+                                end
                                 if ImGui.BeginTabItem(tName) then
+                                    if charBufferCount[tName].Current ~= charBufferCount[tName].Last then
+                                        charBufferCount[tName].Last = charBufferCount[tName].Current
+                                    end
+
                                     tConsole:Render(ImVec2(contentSizeX, contentSizeY))
                                     --Command Line
                                     ImGui.Separator()
@@ -306,6 +335,9 @@ local function RenderGUI()
                                         cmdBuffer = ''
                                     end
                                     ImGui.EndTabItem()
+                                end
+                                if colFlag then
+                                    ImGui.PopStyleColor()
                                 end
                             end
                             ImGui.EndTabBar()
@@ -405,10 +437,6 @@ local function processCommand(...)
     end
 end
 
-local function firstRun()
-    Actor:send({mailbox = 'chat_relay'}, GenerateContent('Hello','Hello'))
-end
-
 local function init()
     ME = mq.TLO.Me.DisplayName()
     guildName = mq.TLO.Me.Guild()
@@ -418,17 +446,20 @@ local function init()
     checkArgs(args)
     mq.bind('/chatrelay', processCommand)
     loadSettings()
-    RegisterActor()
+    RegisterRelayActor()
     mq.delay(250)
-    mq.event('guild_chat_relay', '#*# tells the guild, #*#', getGuildChat)
-    mq.event('guild_out_chat_relay', 'You say to your guild, #*#', sendGuildChat)
-    mq.event('tell_chat_relay', "#1# tells you, '#*#", getTellChat)
-    mq.event('out_chat_relay', "You told #1#, '#*#", getTellChat)
+    mq.event('guild_chat_relay', '#*# tells the guild, #*#', getGuildChat, { keep_links = true })
+    mq.event('guild_out_chat_relay', 'You say to your guild, #*#', sendGuildChat, { keep_links = true })
+    mq.event('tell_chat_relay', "#1# tells you, '#*#", getTellChat, { keep_links = true })
+    mq.event('out_chat_relay', "You told #1#, '#*#", getTellChat, { keep_links = true })
     RUNNING = true
     guildChat[guildName] = ImGui.ConsoleWidget.new("chat_relay_Console"..guildName.."##chat_relayConsole")
-    guildChat[guildName]:AppendText("Welcome to Chat Relay")
     tellChat[ME] = ImGui.ConsoleWidget.new("chat_relay_Console"..ME.."##chat_relayConsole")
-    firstRun()
+    appendColoredTimestamp(guildChat[guildName], "Welcome to Chat Relay")
+    appendColoredTimestamp(tellChat[ME], "Welcome to Chat Relay")
+    charBufferCount[ME] = {Current = 1, Last = 1}
+    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Hello','Hello'))
+    lastAnnounce = os.time()
     mq.imgui.init('Chat_Relay', RenderGUI)
 end
 
