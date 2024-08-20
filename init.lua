@@ -95,7 +95,7 @@ local function appendColoredTimestamp(con, text)
 end
 
 --create mailbox for actors to send messages to
-function RegisterRelayActor()
+local function RegisterRelayActor()
     RelayActor = actors.register('chat_relay', function(message)
         local MemberEntry = message()
         if MemberEntry.Subject == 'Guild' and settings[script].RelayGuild then
@@ -108,6 +108,7 @@ function RegisterRelayActor()
             end
             if guildChat[MemberEntry.Guild] == nil then
                 guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Guild.."##chat_relayConsole")
+                guildBufferCount[MemberEntry.Guild] = {Current = 1, Last = 1}
             end
             appendColoredTimestamp(guildChat[MemberEntry.Guild], MemberEntry.Message)
             guildBufferCount[MemberEntry.Guild].Current = guildBufferCount[MemberEntry.Guild].Current + 1
@@ -264,9 +265,17 @@ local function RenderGUI()
                             for key in pairs(sortedKeys) do
                                 local gName = sortedKeys[key]
                                 local gConsole = guildChat[gName]
+                                local conTag = false
                                 local contentSizeX, contentSizeY = ImGui.GetContentRegionAvail()
                                 contentSizeY = contentSizeY - 30
+                                if guildBufferCount[gName].Current > guildBufferCount[gName].Last then
+                                    ImGui.PushStyleColor(ImGuiCol.Text, ImVec4(1, 0, 0, 1))
+                                    conTag = true
+                                end
                                 if ImGui.BeginTabItem(gName) then
+                                    if guildBufferCount[gName].Current ~= guildBufferCount[gName].Last then
+                                        guildBufferCount[gName].Last = guildBufferCount[gName].Current
+                                    end
                                     gConsole:Render(ImVec2(contentSizeX, contentSizeY))
                                     ImGui.Separator()
                                     local textFlags = bit32.bor(0,
@@ -287,6 +296,9 @@ local function RenderGUI()
                                         cmdBuffer = ''
                                     end
                                     ImGui.EndTabItem()
+                                end
+                                if conTag then
+                                    ImGui.PopStyleColor()
                                 end
                             end
                             ImGui.EndTabBar()
@@ -458,6 +470,7 @@ local function init()
     appendColoredTimestamp(guildChat[guildName], "Welcome to Chat Relay")
     appendColoredTimestamp(tellChat[ME], "Welcome to Chat Relay")
     charBufferCount[ME] = {Current = 1, Last = 1}
+    guildBufferCount[guildName] = {Current = 1, Last = 1}
     RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Hello','Hello'))
     lastAnnounce = os.time()
     mq.imgui.init('Chat_Relay', RenderGUI)
