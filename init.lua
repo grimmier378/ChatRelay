@@ -7,6 +7,7 @@
 local mq = require('mq')
 local ImGui = require 'ImGui'
 local actors = require('actors')
+local Icons = require('mq.ICONS')
 local defaults, settings = {}, {}
 local script = 'Chat Relay'
 local RelayActor -- preloaded variable outside of the function
@@ -18,8 +19,9 @@ local guildChat = {}
 local tellChat = {}
 local lastMessages = {}
 local charBufferCount, guildBufferCount = {}, {}
-local RelayGuild, RelayTells = false, false
+local RelayGuild, RelayTells, Minimized, NewMessage = false, false, false, false
 local lastAnnounce = 0
+local minImg       = mq.CreateTexture(mq.TLO.Lua.Dir() .. "/chatrelay/phone.png")
 
 defaults = {
     Scale = 1,
@@ -28,6 +30,7 @@ defaults = {
     RelayTells = true,
     RelayGuild = true,
     MaxRow = 1,
+    EscapeToMin = false,
     AlphaSort = false,
     ShowOnNewMessage = true,
 }
@@ -98,6 +101,7 @@ end
 local function RegisterRelayActor()
     RelayActor = actors.register('chat_relay', function(message)
         local MemberEntry = message()
+        local HelloMessage = false
         if MemberEntry.Subject == 'Guild' and settings[script].RelayGuild then
             if lastMessages[MemberEntry.Guild] == nil then
                 lastMessages[MemberEntry.Guild] = MemberEntry.Message
@@ -146,11 +150,15 @@ local function RegisterRelayActor()
                     lastAnnounce = announce
                 end
             end
+            HelloMessage = true
         else
             return
         end
-        if settings[script].ShowOnNewMessage and mode == 'driver' then
+        if not HelloMessage then NewMessage = true end
+        local youSent = MemberEntry.Message:find("^You t")
+        if settings[script].ShowOnNewMessage and mode == 'driver' and not HelloMessage and not youSent then
             showMain = true
+            NewMessage = false
         end
     end)
 end
@@ -238,6 +246,8 @@ end
 local function RenderGUI()
 
     if showMain then
+        Minimized = false
+        NewMessage = false
         --ImGui.PushStyleColor(ImGuiCol.Tab, ImVec4(0.000, 0.000, 0.000, 0.000))
         ImGui.PushStyleColor(ImGuiCol.TabActive, ImVec4(0.848, 0.449, 0.115, 1.000))
         ImGui.SetNextWindowSize(185, 480, ImGuiCond.FirstUseEver)
@@ -360,7 +370,47 @@ local function RenderGUI()
                 ImGui.EndTabBar()
             end
         end
+        if ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows) and settings[script].EscapeToMin then
+            if ImGui.IsKeyPressed(ImGuiKey.Escape) then
+                showMain = false
+            end
+        end
         ImGui.PopStyleColor()
+        ImGui.End()
+    end
+
+    if Minimized then
+        ImGui.PushStyleColor(ImGuiCol.Button, ImVec4(0.1, 0.1, 0.1, 1))
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, ImVec4(0.2, 0.2, 0.2, 1))
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, ImVec4(0, 0, 0, 0.6))
+        local openMini, showMini = ImGui.Begin("Chat Relay Mini"..ME, true, bit32.bor(ImGuiWindowFlags.AlwaysAutoResize, ImGuiWindowFlags.NoTitleBar))
+        if not openMini then
+            Minimized = false
+        end
+        if showMini then
+            if not settings[script].ShowOnNewMessage and NewMessage then
+                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(30, 30), ImVec2(0.0,0.0), ImVec2(1, 1), ImVec4(0,0,0,0),ImVec4(1,0,0,1)) then
+                    showMain = true
+                    Minimized = false
+                end
+            else
+                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(30, 30)) then
+                    showMain = true
+                    Minimized = false
+                end
+            end
+
+            if ImGui.BeginPopupContextWindow() then
+                if ImGui.MenuItem("exit") then
+                    mq.exit()
+                end
+                if ImGui.MenuItem("config") then
+                    showConfig = true
+                end
+                ImGui.EndPopup()
+            end
+        end
+        ImGui.PopStyleColor(3)
         ImGui.End()
     end
 
@@ -377,6 +427,7 @@ local function RenderGUI()
             RelayGuild = ImGui.Checkbox("Relay Guild", RelayGuild)
             ImGui.Separator()
             settings[script].ShowOnNewMessage = ImGui.Checkbox("Show on New Message", settings[script].ShowOnNewMessage)
+            settings[script].EscapeToMin = ImGui.Checkbox("Escape to Minimize", settings[script].EscapeToMin)
             ImGui.Separator()
             if ImGui.Button("Save") then
                 settings[script].RelayTells = RelayTells
@@ -393,7 +444,11 @@ local args = {...}
 local function checkArgs(args)
     if #args > 0 then
         if args[1] == 'driver' then
-            showMain = true
+            if args[2] ~= nil then
+                if args[2]=='mini'then Minimized=true else showMain=true end
+            else
+                showMain = true
+            end
             mode = 'driver'
             print('\ayChat Relay:\ao Setting \atDriver\ax Mode. UI will be displayed.')
             print('\ayChat Relay:\ao Type \at/chatrelay show\ax. to Toggle the UI')
@@ -484,6 +539,7 @@ local function mainLoop()
             mq.delay(1000)
             lastZone = currZone
         end
+        if not showMain and mode=='driver'then Minimized=true end
         mq.doevents()
         mq.delay(50)
     end
