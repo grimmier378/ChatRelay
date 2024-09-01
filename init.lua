@@ -154,8 +154,9 @@ local function RegisterRelayActor()
         else
             return
         end
-        if not HelloMessage then NewMessage = true end
-        local youSent = MemberEntry.Message:find("^You t")
+        
+        local youSent = string.find(MemberEntry.Message,"^You") and true or false
+        if not HelloMessage and not youSent then NewMessage = true end
         if settings[script].ShowOnNewMessage and mode == 'driver' and not HelloMessage and not youSent then
             showMain = true
             NewMessage = false
