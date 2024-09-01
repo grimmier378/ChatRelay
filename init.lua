@@ -33,6 +33,7 @@ defaults = {
     EscapeToMin = false,
     AlphaSort = false,
     ShowOnNewMessage = true,
+    IconSize = 30,
 }
 
 ---comment Check to see if the file we want to work on exists.
@@ -390,12 +391,12 @@ local function RenderGUI()
         end
         if showMini then
             if not settings[script].ShowOnNewMessage and NewMessage then
-                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(30, 30), ImVec2(0.0,0.0), ImVec2(1, 1), ImVec4(0,0,0,0),ImVec4(1,0,0,1)) then
+                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(settings[script].IconSize, settings[script].IconSize), ImVec2(0.0,0.0), ImVec2(1, 1), ImVec4(0,0,0,0),ImVec4(1,0,0,1)) then
                     showMain = true
                     Minimized = false
                 end
             else
-                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(30, 30)) then
+                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(settings[script].IconSize, settings[script].IconSize)) then
                     showMain = true
                     Minimized = false
                 end
@@ -429,6 +430,8 @@ local function RenderGUI()
             ImGui.Separator()
             settings[script].ShowOnNewMessage = ImGui.Checkbox("Show on New Message", settings[script].ShowOnNewMessage)
             settings[script].EscapeToMin = ImGui.Checkbox("Escape to Minimize", settings[script].EscapeToMin)
+            ImGui.SetNextItemWidth(100)
+            settings[script].IconSize = ImGui.SliderInt("Icon Size", settings[script].IconSize, 10, 50)
             ImGui.Separator()
             if ImGui.Button("Save") then
                 settings[script].RelayTells = RelayTells
