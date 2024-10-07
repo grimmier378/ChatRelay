@@ -1,72 +1,90 @@
---[[ 
+--[[
     Title: Chat Relay
     Author: Grimmier
     Description: Guild Chat Relay over Actors.
 ]]
 
-local mq = require('mq')
-local ImGui = require 'ImGui'
-local actors = require('actors')
-local Icons = require('mq.ICONS')
-local defaults, settings = {}, {}
-local script = 'Chat Relay'
-local RelayActor -- preloaded variable outside of the function
-local showMain, showConfig = false, false
-local winFlags = bit32.bor(ImGuiWindowFlags.None)
-local RUNNING, aSize  = false, false
-local currZone, lastZone, guildName, ME, configFile, mode
-local guildChat = {}
-local tellChat = {}
-local lastMessages = {}
-local charBufferCount, guildBufferCount = {}, {}
-local RelayGuild, RelayTells, Minimized, NewMessage = false, false, false, false
-local lastAnnounce = 0
-local minImg       = mq.CreateTexture(mq.TLO.Lua.Dir() .. "/chatrelay/phone.png")
+local mq                = require('mq')
+local ImGui             = require 'ImGui'
+local Module            = {}
+Module.ActorMailBox     = 'chat_relay'
+Module.IsRunning        = false
+Module.Name             = 'ChatRelay'
+Module.ImgPath          = mq.TLO.Lua.Dir() .. "/myui/images/phone.png"
+---@diagnostic disable-next-line:undefined-global
+local loadedExeternally = MyUI_ScriptName ~= nil and true or false
 
-defaults = {
-    Scale = 1,
-    AutoSize = false,
-    ShowTooltip = true,
-    RelayTells = true,
-    RelayGuild = true,
-    MaxRow = 1,
-    EscapeToMin = false,
-    AlphaSort = false,
-    ShowOnNewMessage = true,
-    IconSize = 30,
-}
-
----comment Check to see if the file we want to work on exists.
----@param name string -- Full Path to file
----@return boolean -- returns true if the file exists and false otherwise
-local function File_Exists(name)
-    local f=io.open(name,"r")
-    if f~=nil then io.close(f) return true else return false end
+if not loadedExeternally then
+    MyUI_Utils = require('lib.common')
+    MyUI_ThemeLoader = require('lib.theme_loader')
+    MyUI_Actor = require('actors')
+    MyUI_CharLoaded = mq.TLO.Me.DisplayName()
+    MyUI_Guild = mq.TLO.Me.Guild()
+    MyUI_Server = mq.TLO.MacroQuest.Server()
+    MyUI_Mode = 'driver'
+    Module.ImgPath = mq.TLO.Lua.Dir() .. "/chatrelay/images/phone.png"
 end
 
-local function loadSettings()
+local winFlags                          = bit32.bor(ImGuiWindowFlags.None)
+local currZone, lastZone, configFile, mode
+local guildChat                         = {}
+local tellChat                          = {}
+local lastMessages                      = {}
+local charBufferCount, guildBufferCount = {}, {}
+local lastAnnounce                      = 0
+
+local RelayGuild                        = false
+local RelayTells                        = false
+local NewMessage                        = false
+
+local minImg                            = MyUI_Utils.SetImage(Module.ImgPath)
+local Minimized                         = false
+local showMain                          = false
+local showConfig                        = false
+local aSize                             = false
+local RelayActor                        = nil
+
+local defaults                          = {
+    Scale            = 1,
+    AutoSize         = false,
+    ShowTooltip      = true,
+    RelayTells       = true,
+    RelayGuild       = true,
+    MaxRow           = 1,
+    EscapeToMin      = false,
+    AlphaSort        = false,
+    ShowOnNewMessage = true,
+    IconSize         = 30,
+}
+local settings                          = {}
+local script                            = 'Chat Relay'
+
+function LoadSettings()
     -- Check if the dialog data file exists
     local newSetting = false
-    if not File_Exists(configFile) then
+    if not MyUI_Utils.File.Exists(configFile) then
         settings[script] = defaults
         mq.pickle(configFile, settings)
-        loadSettings()
+        LoadSettings()
     else
         -- Load settings from the Lua config file
         settings = dofile(configFile)
         if settings[script] == nil then
             settings[script] = {}
-            settings[script] = defaults 
-            newSetting = true
+            -- settings[script] = defaults
+            -- newSetting = true
         end
     end
 
-    for k, v in pairs(defaults) do
-        if settings[script][k] == nil then
-            settings[script][k] = v
-            newSetting = true
-        end
-    end
+    -- for k, v in pairs(defaults) do
+    --     if settings[script][k] == nil then
+    --         settings[script][k] = v
+    --         newSetting = true
+    --     end
+    -- end
+
+    newSetting = MyUI_Utils.CheckDefaultSettings(defaults, settings[script])
+
     RelayGuild = settings[script].RelayGuild
     RelayTells = settings[script].RelayTells
     if newSetting then mq.pickle(configFile, settings) end
@@ -75,33 +93,19 @@ end
 local function GenerateContent(sub, message)
     return {
         Subject = sub,
-        Name = ME,
-        Guild = guildName,
-        Message = message,
+        Name = MyUI_CharLoaded,
+        Guild = MyUI_Guild,
+        Message = message or '',
         Tell = '',
     }
 end
 
--- Function to append colored text segments
-local function appendColoredTimestamp(con, text)
-
-    local timestamp = mq.TLO.Time.Time24()
-    local yellowColor = ImVec4(1, 1, 0, 1)
-    local whiteColor = ImVec4(1, 1, 1, 1)
-    local greenColor = ImVec4(0, 1, 0, 1)
-    local tealColor = ImVec4(0, 1, 1, 1)
-    con:AppendTextUnformatted(yellowColor, "[")
-    con:AppendTextUnformatted(whiteColor, timestamp)
-    con:AppendTextUnformatted(yellowColor, "] ")
-    con:AppendTextUnformatted(greenColor, text)
-    con:AppendText("")
-    
-end
-
 --create mailbox for actors to send messages to
 local function RegisterRelayActor()
-    RelayActor = actors.register('chat_relay', function(message)
+    RelayActor = MyUI_Actor.register(Module.ActorMailBox, function(message)
+        local tStamp = mq.TLO.Time.Time24()
         local MemberEntry = message()
+        if MemberEntry == nil then return end
         local HelloMessage = false
         if MemberEntry.Subject == 'Guild' and settings[script].RelayGuild then
             if lastMessages[MemberEntry.Guild] == nil then
@@ -112,42 +116,45 @@ local function RegisterRelayActor()
                 lastMessages[MemberEntry.Guild] = MemberEntry.Message
             end
             if guildChat[MemberEntry.Guild] == nil then
-                guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Guild.."##chat_relayConsole")
-                guildBufferCount[MemberEntry.Guild] = {Current = 1, Last = 1}
+                guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MemberEntry.Guild .. "##chat_relayConsole")
+                guildBufferCount[MemberEntry.Guild] = { Current = 1, Last = 1, }
             end
-            appendColoredTimestamp(guildChat[MemberEntry.Guild], MemberEntry.Message)
+            MyUI_Utils.AppendColoredTimestamp(guildChat[MemberEntry.Guild], tStamp, MemberEntry.Message)
             guildBufferCount[MemberEntry.Guild].Current = guildBufferCount[MemberEntry.Guild].Current + 1
         elseif MemberEntry.Subject == 'Tell' and settings[script].RelayTells then
             if tellChat[MemberEntry.Name] == nil then
-                tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
+                tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MemberEntry.Name .. "##chat_relayConsole")
             end
-            appendColoredTimestamp(tellChat[MemberEntry.Name], MemberEntry.Message)
+            MyUI_Utils.AppendColoredTimestamp(tellChat[MemberEntry.Name], tStamp, MemberEntry.Message)
             charBufferCount[MemberEntry.Name].Current = charBufferCount[MemberEntry.Name].Current + 1
-        elseif MemberEntry.Subject == 'Reply' and string.lower(MemberEntry.Name) == string.lower(ME) and settings[script].RelayTells then
+        elseif MemberEntry.Subject == 'Reply' and string.lower(MemberEntry.Name) == string.lower(MyUI_CharLoaded) and settings[script].RelayTells then
             if MemberEntry.Tell == 'r' then
                 mq.cmdf("/r %s", MemberEntry.Message)
             else
                 mq.cmdf("/tell %s %s", MemberEntry.Tell, MemberEntry.Message)
             end
-        elseif MemberEntry.Subject == 'GuildReply' and string.lower(MemberEntry.Name) == string.lower(ME) and MemberEntry.Guild == guildName then
+        elseif MemberEntry.Subject == 'GuildReply' and string.lower(MemberEntry.Name) == string.lower(MyUI_CharLoaded) and MemberEntry.Guild == MyUI_Guild then
             mq.cmdf("/gu %s", MemberEntry.Message)
         elseif MemberEntry.Subject == 'Hello' then
-            if MemberEntry.Name ~= ME then
+            if MemberEntry.Name ~= MyUI_CharLoaded then
                 local announce = os.time()
-                if tellChat[MemberEntry.Name] == nil then
-                    tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Name.."##chat_relayConsole")
-                    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Hello', 'Hello'))
-                    charBufferCount[MemberEntry.Name] = {Current = 1, Last = 1}
-                    appendColoredTimestamp(tellChat[MemberEntry.Name], "ChatRelay: User Added")
+                if tellChat[MemberEntry.Name] == nil and RelayActor ~= nil then
+                    tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MemberEntry.Name .. "##chat_relayConsole")
+                    RelayActor:send({ mailbox = 'chat_relay', script = 'myui', }, GenerateContent('Hello', 'Hello'))
+                    RelayActor:send({ mailbox = 'chat_relay', script = 'chatrelay', }, GenerateContent('Hello', 'Hello'))
+
+                    charBufferCount[MemberEntry.Name] = { Current = 1, Last = 1, }
+                    MyUI_Utils.AppendColoredTimestamp(tellChat[MemberEntry.Name], tStamp, " User Added")
                     lastAnnounce = announce
                 end
                 if guildChat[MemberEntry.Guild] == nil then
-                    guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console"..MemberEntry.Guild.."##chat_relayConsole")
-                    guildBufferCount[MemberEntry.Guild] = {Current = 1, Last = 1}
-                    appendColoredTimestamp(guildChat[MemberEntry.Guild], "ChatRelay: Guild Added")
+                    guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MemberEntry.Guild .. "##chat_relayConsole")
+                    guildBufferCount[MemberEntry.Guild] = { Current = 1, Last = 1, }
+                    MyUI_Utils.AppendColoredTimestamp(guildChat[MemberEntry.Guild], tStamp, " Guild Added")
                 end
-                if announce - lastAnnounce > 5 then
-                    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Hello', 'Hello'))
+                if announce - lastAnnounce > 5 and RelayActor ~= nil then
+                    RelayActor:send({ mailbox = 'chat_relay', script = 'myui', }, GenerateContent('Hello', 'Hello'))
+                    RelayActor:send({ mailbox = 'chat_relay', script = 'chatrelay', }, GenerateContent('Hello', 'Hello'))
                     lastAnnounce = announce
                 end
             end
@@ -155,8 +162,8 @@ local function RegisterRelayActor()
         else
             return
         end
-        
-        local youSent = string.find(MemberEntry.Message,"^You") and true or false
+
+        local youSent = string.find(MemberEntry.Message, "^You") and true or false
         if not HelloMessage and not youSent then NewMessage = true end
         if settings[script].ShowOnNewMessage and mode == 'driver' and not HelloMessage and not youSent then
             showMain = true
@@ -185,7 +192,7 @@ end
 local function ChannelExecCommand(text, channName, channelID)
     local separator = "|"
     local args = {}
-    for arg in string.gmatch(text, "([^"..separator.."]+)") do
+    for arg in string.gmatch(text, "([^" .. separator .. "]+)") do
         table.insert(args, arg)
     end
     local who = args[1]
@@ -195,8 +202,9 @@ local function ChannelExecCommand(text, channName, channelID)
         text = StringTrim(text)
         if text == 'clear' then
             channelID:Clear()
-        elseif who ~= nil and message ~= nil then
-            RelayActor:send({mailbox = 'chat_relay'}, { Name = channName, Subject = 'Reply', Tell = who, Message = message })
+        elseif who ~= nil and message ~= nil and RelayActor ~= nil then
+            RelayActor:send({ mailbox = 'chat_relay', script = 'myui', }, { Name = channName, Subject = 'Reply', Tell = who, Message = message, })
+            RelayActor:send({ mailbox = 'chat_relay', script = 'chatrelay', }, { Name = channName, Subject = 'Reply', Tell = who, Message = message, })
         end
     end
 end
@@ -206,7 +214,7 @@ end
 local function ChannelExecGuildCommand(text, channName, channelID)
     local separator = "|"
     local args = {}
-    for arg in string.gmatch(text, "([^"..separator.."]+)") do
+    for arg in string.gmatch(text, "([^" .. separator .. "]+)") do
         table.insert(args, arg)
     end
     local who = args[1]
@@ -216,37 +224,43 @@ local function ChannelExecGuildCommand(text, channName, channelID)
         text = StringTrim(text)
         if text == 'clear' then
             channelID:Clear()
-        elseif who ~= nil and message ~= nil then
-            RelayActor:send({mailbox = 'chat_relay'}, { Name = who, Subject = 'GuildReply', Guild = channName, Message = message })
+        elseif who ~= nil and message ~= nil and RelayActor ~= nil then
+            RelayActor:send({ mailbox = 'chat_relay', script = 'myui', }, { Name = who, Subject = 'GuildReply', Guild = channName, Message = message, })
+            RelayActor:send({ mailbox = 'chat_relay', script = 'chatrelay', }, { Name = who, Subject = 'GuildReply', Guild = channName, Message = message, })
         end
     end
 end
 
 local function getGuildChat(line)
     if not settings[script].RelayGuild then return end
-    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Guild', line))
+    if RelayActor ~= nil then
+        RelayActor:send({ mailbox = 'chat_relay', script = 'myui', }, GenerateContent('Guild', line))
+        RelayActor:send({ mailbox = 'chat_relay', script = 'chatrelay', }, GenerateContent('Guild', line))
+    end
 end
 
 local function sendGuildChat(line)
     if not settings[script].RelayGuild then return end
-    local repaceString = string.format('%s tells the guild,',ME)
-    lastMessages[guildName] = string.gsub(line,'You say to your guild,', repaceString)
-    print(lastMessages[guildName])
-    guildChat[guildName]:AppendText(line)
+    local repaceString = string.format('%s tells the guild,', MyUI_CharLoaded)
+    lastMessages[MyUI_Guild] = string.gsub(line, 'You say to your guild,', repaceString)
+    guildChat[MyUI_Guild]:AppendText(line)
 end
 
 local function getTellChat(line, who)
+    if string.find(line, " pet tells you") then return end
     if not settings[script].RelayTells then return end
-    local checkNPC = string.format("npc =\"%s\"",who)
+    local checkNPC = string.format("npc =\"%s\"", who)
     local master = mq.TLO.Spawn(who).Master.Type() or 'noMaster'
     -- local checkPet = string.format("pcpet %s",who)
     local pet = mq.TLO.Me.Pet.DisplayName() or 'noPet'
     if (mq.TLO.SpawnCount(checkNPC)() ~= 0 or master == 'PC' or pet == who) then return end
-    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Tell', line))
+    if RelayActor ~= nil then
+        RelayActor:send({ mailbox = 'chat_relay', script = 'chatrelay', }, GenerateContent('Tell', line))
+        RelayActor:send({ mailbox = 'chat_relay', script = 'myui', }, GenerateContent('Tell', line))
+    end
 end
 
-local function RenderGUI()
-
+function Module.RenderGUI()
     if showMain then
         Minimized = false
         NewMessage = false
@@ -258,7 +272,7 @@ local function RenderGUI()
         else
             winFlags = bit32.bor(ImGuiWindowFlags.None)
         end
-        local winLbl = string.format("%s##%s_%s", script, script, ME)
+        local winLbl = string.format("%s##%s_%s", script, script, MyUI_CharLoaded)
         local openGUI, showGUI = ImGui.Begin(winLbl, true, winFlags)
         if not openGUI then
             showMain = false
@@ -292,9 +306,9 @@ local function RenderGUI()
                                     ImGui.Separator()
                                     local textFlags = bit32.bor(0,
                                         ImGuiInputTextFlags.EnterReturnsTrue
-                                        -- not implemented yet
-                                        -- ImGuiInputTextFlags.CallbackCompletion,
-                                        -- ImGuiInputTextFlags.CallbackHistory
+                                    -- not implemented yet
+                                    -- ImGuiInputTextFlags.CallbackCompletion,
+                                    -- ImGuiInputTextFlags.CallbackHistory
                                     )
                                     -- local contentSizeX, _ = ImGui.GetContentRegionAvail()
                                     ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 2)
@@ -302,9 +316,9 @@ local function RenderGUI()
                                     local accept = false
                                     local cmdBuffer = ''
                                     ImGui.SetNextItemWidth(contentSizeX)
-                                    cmdBuffer, accept = ImGui.InputTextWithHint('##Input##'..gName, "who|message",cmdBuffer, textFlags)
+                                    cmdBuffer, accept = ImGui.InputTextWithHint('##Input##' .. gName, "who|message", cmdBuffer, textFlags)
                                     if accept then
-                                        ChannelExecGuildCommand(cmdBuffer,gName, gConsole)
+                                        ChannelExecGuildCommand(cmdBuffer, gName, gConsole)
                                         cmdBuffer = ''
                                     end
                                     ImGui.EndTabItem()
@@ -343,9 +357,9 @@ local function RenderGUI()
                                     ImGui.Separator()
                                     local textFlags = bit32.bor(0,
                                         ImGuiInputTextFlags.EnterReturnsTrue
-                                        -- not implemented yet
-                                        -- ImGuiInputTextFlags.CallbackCompletion,
-                                        -- ImGuiInputTextFlags.CallbackHistory
+                                    -- not implemented yet
+                                    -- ImGuiInputTextFlags.CallbackCompletion,
+                                    -- ImGuiInputTextFlags.CallbackHistory
                                     )
                                     -- local contentSizeX, _ = ImGui.GetContentRegionAvail()
                                     ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 2)
@@ -353,9 +367,9 @@ local function RenderGUI()
                                     local accept = false
                                     local cmdBuffer = ''
                                     ImGui.SetNextItemWidth(contentSizeX)
-                                    cmdBuffer, accept = ImGui.InputTextWithHint('##Input##'..tName, "who|message",cmdBuffer, textFlags)
+                                    cmdBuffer, accept = ImGui.InputTextWithHint('##Input##' .. tName, "who|message", cmdBuffer, textFlags)
                                     if accept then
-                                        ChannelExecCommand(cmdBuffer,tName, tConsole)
+                                        ChannelExecCommand(cmdBuffer, tName, tConsole)
                                         cmdBuffer = ''
                                     end
                                     ImGui.EndTabItem()
@@ -385,27 +399,29 @@ local function RenderGUI()
         ImGui.PushStyleColor(ImGuiCol.Button, ImVec4(0.1, 0.1, 0.1, 1))
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, ImVec4(0.2, 0.2, 0.2, 1))
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, ImVec4(0, 0, 0, 0.6))
-        local openMini, showMini = ImGui.Begin("Chat Relay Mini"..ME, true, bit32.bor(ImGuiWindowFlags.AlwaysAutoResize, ImGuiWindowFlags.NoTitleBar))
+        ImGui.SetNextWindowSize(100, 100, ImGuiCond.FirstUseEver)
+        ImGui.SetNextWindowPos(500, 700, ImGuiCond.FirstUseEver)
+        local openMini, showMini = ImGui.Begin("Chat Relay Mini##" .. MyUI_CharLoaded, true, bit32.bor(ImGuiWindowFlags.AlwaysAutoResize, ImGuiWindowFlags.NoTitleBar))
         if not openMini then
             Minimized = false
         end
         if showMini then
             if not settings[script].ShowOnNewMessage and NewMessage then
-                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(settings[script].IconSize, settings[script].IconSize), ImVec2(0.0,0.0), ImVec2(1, 1), ImVec4(0,0,0,0),ImVec4(1,0,0,1)) then
+                if ImGui.ImageButton("ChatRelay", minImg:GetTextureID(), ImVec2(settings[script].IconSize, settings[script].IconSize), ImVec2(0.0, 0.0), ImVec2(1, 1), ImVec4(0, 0, 0, 0), ImVec4(1, 0, 0, 1)) then
                     showMain = true
                     Minimized = false
                 end
             else
-                if ImGui.ImageButton("ChatRelay",minImg:GetTextureID(), ImVec2(settings[script].IconSize, settings[script].IconSize)) then
+                if ImGui.ImageButton("ChatRelay", minImg:GetTextureID(), ImVec2(settings[script].IconSize, settings[script].IconSize)) then
                     showMain = true
                     Minimized = false
                 end
             end
 
             if ImGui.BeginPopupContextWindow() then
-                if ImGui.MenuItem("exit") then
-                    mq.exit()
-                end
+                -- if ImGui.MenuItem("exit") then
+                --     mq.exit()
+                -- end
                 if ImGui.MenuItem("config") then
                     showConfig = true
                 end
@@ -444,12 +460,79 @@ local function RenderGUI()
     end
 end
 
-local args = {...}
-local function checkArgs(args)
+function SetSetting(setting, value)
+    settings[script][setting] = value
+    mq.pickle(configFile, settings)
+end
+
+function Module.CheckMode()
+    if MyUI_Mode == 'driver' then
+        Minimized = settings[script].EscapeToMin
+        showMain = not Minimized
+        mode = 'driver'
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Setting \atDriver\ax Mode. UI will be displayed.')
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Type \at/chatrelay show\ax. to Toggle the UI')
+    elseif MyUI_Mode == 'client' then
+        showMain = false
+        mode = 'client'
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Setting \atClient\ax Mode. UI will not be displayed.')
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Type \at/chatrelay show\ax. to Toggle the UI')
+    end
+end
+
+local function processCommand(...)
+    local args = { ..., }
+    if #args > 0 then
+        if args[1] == 'gui' or args[1] == 'show' or args[1] == 'open' then
+            showMain = not showMain
+            if showMain then
+                MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Toggling GUI \atOpen\ax.')
+            else
+                MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Toggling GUI \atClosed\ax.')
+            end
+        elseif args[1] == 'exit' or args[1] == 'quit' then
+            Module.IsRunning = false
+            MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Exiting.')
+            Module.IsRunning = false
+        elseif args[1] == 'tells' then
+            settings[script].RelayTells = not settings[script].RelayTells
+            RelayTells = settings[script].RelayTells
+            mq.pickle(configFile, settings)
+        elseif args[1] == 'guild' then
+            settings[script].RelayGuild = not settings[script].RelayGuild
+            RelayGuild = settings[script].RelayGuild
+            mq.pickle(configFile, settings)
+        elseif args[1] == 'autoshow' then
+            settings[script].ShowOnNewMessage = not settings[script].ShowOnNewMessage
+            mq.pickle(configFile, settings)
+        else
+            MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao Invalid command given.')
+        end
+    else
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ao No command given.')
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ag /chatrelay gui \ao- Toggles the GUI on and off.')
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ag /chatrelay tells \ao- Toggles the Relay of Tells.')
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ag /chatrelay guild \ao- Toggles the Relay of Guild Chat.')
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ag /chatrelay autoshow \ao- Toggles the Show on New Message.')
+        MyUI_Utils.PrintOutput('MyUI', nil, '\ayChat Relay:\ag /chatrelay exit \ao- Exits the plugin.')
+    end
+end
+
+function Module.Unload()
+    mq.unevent("guild_chat_relay")
+    mq.unevent("guild_out_chat_relay")
+    mq.unevent("tell_chat_relay")
+    mq.unevent("out_chat_relay")
+    mq.unbind("/chatrelay")
+    RelayActor = nil
+end
+
+local arguments = { ..., }
+function Module.CheckArgs(args)
     if #args > 0 then
         if args[1] == 'driver' then
             if args[2] ~= nil then
-                if args[2]=='mini'then Minimized=true else showMain=true end
+                if args[2] == 'mini' then Minimized = true else showMain = true end
             else
                 showMain = true
             end
@@ -471,85 +554,69 @@ local function checkArgs(args)
     end
 end
 
-local function processCommand(...)
-    local args = {...}
-    if #args > 0 then
-        if args[1] == 'gui' or args[1] == 'show' or args[1] == 'open' then
-            showMain = not showMain
-            if showMain then
-                print('\ayChat Relay:\ao Toggling GUI \atOpen\ax.')
-            else
-                print('\ayChat Relay:\ao Toggling GUI \atClosed\ax.')
-            end
-        elseif args[1] == 'exit' or args[1] == 'quit'  then
-            print('\ayChat Relay:\ao Exiting.')
-            RUNNING = false
-        elseif args[1] == 'tells' then
-            settings[script].RelayTells = not settings[script].RelayTells
-            RelayTells = settings[script].RelayTells
-            mq.pickle(configFile, settings)
-        elseif args[1] == 'guild' then
-            settings[script].RelayGuild = not settings[script].RelayGuild
-            RelayGuild = settings[script].RelayGuild
-            mq.pickle(configFile, settings)
-        elseif args[1] == 'autoshow' then
-            settings[script].ShowOnNewMessage = not settings[script].ShowOnNewMessage
-            mq.pickle(configFile, settings)
-        else
-            print('\ayChat Relay:\ao Invalid command given.')
-        end
-    else
-        print('\ayChat Relay:\ao No command given.')
-        print('\ayChat Relay:\ag /chatrelay gui \ao- Toggles the GUI on and off.')
-        print('\ayChat Relay:\ag /chatrelay tells \ao- Toggles the Relay of Tells.')
-        print('\ayChat Relay:\ag /chatrelay guild \ao- Toggles the Relay of Guild Chat.')
-        print('\ayChat Relay:\ag /chatrelay autoshow \ao- Toggles the Show on New Message.')
-        print('\ayChat Relay:\ag /chatrelay exit \ao- Exits the plugin.')
-    end
-end
-
 local function init()
-    ME = mq.TLO.Me.DisplayName()
-    guildName = mq.TLO.Me.Guild()
-    configFile = string.format("%s/MyUI/ChatRelay/%s/%s.lua", mq.configDir, mq.TLO.EverQuest.Server(), ME)
+    local tStamp = mq.TLO.Time.Time24()
+    configFile = string.format("%s/MyUI/ChatRelay/%s/%s.lua", mq.configDir, MyUI_Server, MyUI_CharLoaded)
     currZone = mq.TLO.Zone.ID()
     lastZone = currZone
-    checkArgs(args)
     mq.bind('/chatrelay', processCommand)
-    loadSettings()
+    LoadSettings()
+    if loadedExeternally then
+        Module.CheckMode()
+    else
+        Module.CheckArgs(arguments)
+    end
     RegisterRelayActor()
-    mq.delay(250)
-    mq.event('guild_chat_relay', '#*# tells the guild, #*#', getGuildChat, { keep_links = true })
-    mq.event('guild_out_chat_relay', 'You say to your guild, #*#', sendGuildChat, { keep_links = true })
-    mq.event('tell_chat_relay', "#1# tells you, '#*#", getTellChat, { keep_links = true })
-    mq.event('out_chat_relay', "You told #1#, '#*#", getTellChat, { keep_links = true })
-    RUNNING = true
-    guildChat[guildName] = ImGui.ConsoleWidget.new("chat_relay_Console"..guildName.."##chat_relayConsole")
-    tellChat[ME] = ImGui.ConsoleWidget.new("chat_relay_Console"..ME.."##chat_relayConsole")
-    appendColoredTimestamp(guildChat[guildName], "Welcome to Chat Relay")
-    appendColoredTimestamp(tellChat[ME], "Welcome to Chat Relay")
-    charBufferCount[ME] = {Current = 1, Last = 1}
-    guildBufferCount[guildName] = {Current = 1, Last = 1}
-    RelayActor:send({mailbox = 'chat_relay'}, GenerateContent('Hello','Hello'))
+    -- mq.delay(250)
+    mq.event('guild_chat_relay', '#*# tells the guild, #*#', getGuildChat, { keepLinks = true, })
+    mq.event('guild_out_chat_relay', 'You say to your guild, #*#', sendGuildChat, { keepLinks = true, })
+    mq.event('tell_chat_relay', "#1# tells you, '#*#", getTellChat, { keepLinks = true, })
+    mq.event('out_chat_relay', "You told #1#, '#*#", getTellChat, { keepLinks = true, })
+    Module.IsRunning = true
+    guildChat[MyUI_Guild] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MyUI_Guild .. "##chat_relayConsole")
+    tellChat[MyUI_CharLoaded] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MyUI_CharLoaded .. "##chat_relayConsole")
+    MyUI_Utils.AppendColoredTimestamp(guildChat[MyUI_Guild], tStamp, "Welcome to Chat Relay")
+    MyUI_Utils.AppendColoredTimestamp(tellChat[MyUI_CharLoaded], tStamp, "Welcome to Chat Relay")
+    charBufferCount[MyUI_CharLoaded] = { Current = 1, Last = 1, }
+    guildBufferCount[MyUI_Guild] = { Current = 1, Last = 1, }
     lastAnnounce = os.time()
-    mq.imgui.init('Chat_Relay', RenderGUI)
+    Module.IsRunning = true
+    if not loadedExeternally then
+        mq.imgui.init('Chat_Relay', Module.RenderGUI)
+        Module.LocalLoop()
+    end
 end
 
-local function mainLoop()
-    while RUNNING do
-        if  mq.TLO.EverQuest.GameState() ~= "INGAME" then print("\aw[\atChat Relay\ax] \arNot in game, \aoSaying \ayGoodbye\ax and Shutting Down...") mq.exit() end
+local clockTimer = mq.gettime()
+
+function Module.MainLoop()
+    if loadedExeternally then
+        ---@diagnostic disable-next-line: undefined-global
+        if not MyUI_LoadModules.CheckRunning(Module.IsRunning, Module.Name) then return end
+    end
+    mq.doevents()
+    local elapsedTime = mq.gettime() - clockTimer
+    if elapsedTime >= 50 then
         currZone = mq.TLO.Zone.ID()
         if currZone ~= lastZone then
-            mq.delay(1000)
             lastZone = currZone
         end
-        if not showMain and mode=='driver'then Minimized=true end
-        mq.doevents()
-        mq.delay(50)
+        if not showMain and mode == 'driver' then Minimized = true end
     end
+end
+
+function Module.LocalLoop()
+    while Module.IsRunning do
+        Module.MainLoop()
+        mq.delay(1)
+    end
+end
+
+if mq.TLO.EverQuest.GameState() ~= "INGAME" then
+    printf("\aw[\at%s\ax] \arNot in game, \ayTry again later...", script)
     mq.exit()
 end
 
-if mq.TLO.EverQuest.GameState() ~= "INGAME" then print("\aw[\atChat Relay\ax] \arNot in game, \ayTry again later...") mq.exit() end
 init()
-mainLoop()
+
+return Module
