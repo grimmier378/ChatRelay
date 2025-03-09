@@ -132,17 +132,18 @@ local function RegisterRelayActor()
             else
                 lastMessages[MemberEntry.Guild] = MemberEntry.Message
             end
+            if charBufferCount[MemberEntry.Guild] == nil then charBufferCount[MemberEntry.Guild] = { Current = 1, Last = 1, } end
             if guildChat[MemberEntry.Guild] == nil then
                 guildChat[MemberEntry.Guild] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MemberEntry.Guild .. "##chat_relayConsole")
-                -- guildChat[MemberEntry.Guild].fontSize = settings[Module.DisplayName].FontSize
                 guildBufferCount[MemberEntry.Guild] = { Current = 1, Last = 1, }
             end
             Module.Utils.AppendColoredTimestamp(guildChat[MemberEntry.Guild], tStamp, MemberEntry.Message)
             guildBufferCount[MemberEntry.Guild].Current = guildBufferCount[MemberEntry.Guild].Current + 1
         elseif MemberEntry.Subject == 'Tell' and settings[Module.DisplayName].RelayTells then
+            if charBufferCount[MemberEntry.Name] == nil then charBufferCount[MemberEntry.Name] = { Current = 1, Last = 1, } end
             if tellChat[MemberEntry.Name] == nil then
                 tellChat[MemberEntry.Name] = ImGui.ConsoleWidget.new("chat_relay_Console" .. MemberEntry.Name .. "##chat_relayConsole")
-                -- tellChat[MemberEntry.Name].fontSize = settings[Module.DisplayName].FontSize
+                charBufferCount[MemberEntry.Name] = { Current = 1, Last = 1, }
             end
             Module.Utils.AppendColoredTimestamp(tellChat[MemberEntry.Name], tStamp, MemberEntry.Message)
             charBufferCount[MemberEntry.Name].Current = charBufferCount[MemberEntry.Name].Current + 1
